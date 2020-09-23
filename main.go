@@ -26,6 +26,18 @@ func main() {
 	http.HandleFunc("/file/upload/suc", handler.UploadFileSucHandler)
 	//下载文件
 	http.HandleFunc("/file/download", handler.DownloadFileHandler)
+	//查询文件元信息
+	http.HandleFunc("/file/meta", handler.GetFileMetaData)
+
+	//删除文件元信息
+	http.HandleFunc("/file/delete", handler.DeleteFileMetaData)
+
+	//修改文件元信息【文件重命名】
+	http.HandleFunc("/file/update", handler.UpdateFileMetaData)
+	//获取用户最近上传文件【批量查询】
+	http.HandleFunc("/file/query", handler.GetLatestFileMetaData)
+
+
 
 	//监听服务器端口
 	http.ListenAndServe(":8080", nil)

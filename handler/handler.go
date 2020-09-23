@@ -4,12 +4,14 @@ import (
 	dblayer "DFS/db"
 	"DFS/model"
 	"DFS/util"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -88,8 +90,6 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 3.						  如果存在，就得到对应文件的信息
 									打开对应的文件，然后读取文件内容并返回，
 */
-
-
 func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 	//1. 解析用户请求并获取对应的filehash
 	r.ParseForm()
@@ -129,4 +129,101 @@ func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 */
 func UploadFileSucHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("文件上传成功............."))
+}
+
+/*
+查询文件元信息
+*/
+func GetFileMetaData(w http.ResponseWriter, r *http.Request) {
+	//1. 获取用户表单filesha1值
+	r.ParseForm()
+	fileHash := r.Form.Get("filehash")
+	if len(fileHash) <= 0 {
+		w.Write([]byte("请输入文件的哈希值："))
+		return
+	}
+	//2. 根据获取用户filesha1值查询对应的文件元信息
+	fileMetaData, err := dblayer.GetFileMetaData(fileHash)
+	if err != nil {
+		log.Println("----------------------------根据filehash获取文件元信息失败----------------------------")
+		w.Write([]byte("根据filehash获取文件元信息失败"))
+		return
+	}
+	//3. 将文件元信息序列化
+	ret, err := json.Marshal(fileMetaData)
+	if err != nil {
+		log.Println("----------------------------文件结构信息序列化失败----------------------------")
+		w.Write([]byte("文件结构信息序列化失败"))
+		return
+	}
+	//4. 将序列化后的信息返回给用户
+	w.Write(ret)
+}
+
+/*
+查询最近上传的几个文件的信息
+*/
+func GetLatestFileMetaData(w http.ResponseWriter, r *http.Request) {
+	r.ParseForm()
+	limitCount, err := strconv.Atoi(r.Form.Get("limit"))
+	if err != nil {
+		log.Println("----------------------------获取用户获取的文件个数失败----------------------------")
+		w.Write([]byte("获取用户获取的文件个数失败，请稍后再试！！！"))
+		return
+	}
+	ret, err := dblayer.GetLastestFileMetaData(limitCount)
+	if err != nil {
+		log.Println("----------------------------获取用户最近上传文件失败----------------------------")
+		w.Write([]byte("获取用户最近上传文件失败，请稍后再试！！！"))
+		return
+	}
+	wRet, err := json.Marshal(ret)
+	if err != nil {
+		log.Println("----------------------------json序列化失败----------------------------")
+		w.Write([]byte("json序列化失败，请稍后再试！！！"))
+		return
+	}
+	w.Write(wRet)
+}
+
+/*
+文件修改：post接口，目前只是文件重命名
+*/
+func UpdateFileMetaData(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		//1. 解析用户请求：获取要修改文件的hash值以及文件新的名字
+		r.ParseForm()
+		filehash := r.Form.Get("filehash")
+
+		filename := r.Form.Get("filename")
+		opRet := dblayer.UpdateFileMetaData(filehash, filename)
+		if !opRet {
+			log.Println("----------------------------文件重命名失败----------------------------")
+			w.Write([]byte("文件重命名失败，请稍后再试！！！"))
+			return
+		}
+		w.Write([]byte("文件重命名成功！！！"))
+	}
+}
+
+/*
+文件删除：目前是get请求
+用户需要传入一个filehash参数
+*/
+func DeleteFileMetaData(w http.ResponseWriter, r *http.Request) {
+	//1. 获取用户表单filesha1值
+	r.ParseForm()
+	fileHash := r.Form.Get("filehash")
+	if len(fileHash) <= 0 {
+		w.Write([]byte("请输入文件的哈希值："))
+		return
+	}
+	//2. 根据获取用户filesha1值查询对应的文件元信息
+	opRet := dblayer.DeleteFileMetaData(fileHash)
+	if !opRet {
+		log.Println("----------------------------文件删除失败----------------------------")
+		w.Write([]byte("文件删除失败，请稍后再试"))
+		return
+	}
+	w.Write([]byte("文件删除成功"))
 }
