@@ -20,7 +20,7 @@ var conn *sql.DB
 
 //初始化连接
 func init() {
-	dataBaseSource := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s", config.MysqlUser,
+	dataBaseSource := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=%s&loc=Local&parseTime=true", config.MysqlUser,
 		config.MysqlPassword, config.MysqlHost, config.MysqlPort, config.MysqlDatabase, config.MysqlCharset)
 	conn, _ = sql.Open("mysql", dataBaseSource)
 

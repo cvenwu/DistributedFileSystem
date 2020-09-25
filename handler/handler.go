@@ -78,7 +78,7 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			//4. 返回响应表示我们上传成功
 			//重定向：返回一个302响应码，要求用户向响应头部中的url重新发起请求
-			http.Redirect(w, r, "/file/upload/suc", http.StatusFound)
+			http.Redirect(w, r, "/static/view/home.html", http.StatusFound)
 		}
 	}
 }
@@ -94,6 +94,7 @@ func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 	//1. 解析用户请求并获取对应的filehash
 	r.ParseForm()
 	filehash := r.Form.Get("filehash")
+	log.Println("用户点击了下载文件，文件hash码为：", filehash)
 	//2. 根据filehash获取对应的文件元信息
 	fileMetaData, err := dblayer.GetFileMetaData(filehash)
 	if err != nil {
@@ -116,7 +117,7 @@ func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-
+	log.Println("下载文件成功--------------------------------")
 	//理论上工作是已经做完了的，但是为了让浏览器做一个演示，我们需要将一个http的响应头，让浏览器识别出来就可以当成一个文件进行下载
 	w.Header().Set("Content-Type", "application/octect-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileMetaData.FileName))
@@ -177,6 +178,7 @@ func GetLatestFileMetaData(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("获取用户最近上传文件失败，请稍后再试！！！"))
 		return
 	}
+	log.Println(ret)
 	wRet, err := json.Marshal(ret)
 	if err != nil {
 		log.Println("----------------------------json序列化失败----------------------------")

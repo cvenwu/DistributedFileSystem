@@ -3,6 +3,7 @@ package db
 import (
 	"DFS/db/mysql"
 	"DFS/model"
+	"DFS/util"
 	"log"
 )
 
@@ -17,7 +18,7 @@ import (
 根据文件的filehash值获取对应的文件结构体
 */
 func GetFileMetaData(filehash string) (model.FileMetaData, error) {
-	stmt, err := mysql.GetMysqlConn().Prepare("Select file_sha1, file_name, file_size, file_addr, update_at from tbl_file where file_sha1 = ? and status = 1 limit 1")
+	stmt, err := mysql.GetMysqlConn().Prepare("Select file_sha1, file_name, file_size, file_addr, DATE_FORMAT(update_at,'%Y-%m-%d %H:%i:%S') from tbl_file where file_sha1 = ? and status = 1 limit 1")
 	defer stmt.Close()
 	if err != nil {
 		log.Println("----------------------------预编译失败----------------------------")
@@ -26,7 +27,7 @@ func GetFileMetaData(filehash string) (model.FileMetaData, error) {
 	//定义一个
 	fileMetaData := model.FileMetaData{}
 	err = stmt.QueryRow(filehash).Scan(&fileMetaData.FileHash, &fileMetaData.FileName, &fileMetaData.FileSize, &fileMetaData.FileLocation, &fileMetaData.UploadTimeAt)
-
+	fileMetaData.FileSizeFormat = util.FormatFileSize(fileMetaData.FileSize)
 	if err != nil {
 		log.Println("----------------------------查询后赋值失败----------------------------", err)
 		return model.FileMetaData{}, err
@@ -107,7 +108,7 @@ func UpdateFileMetaData(filehash string, filename string) bool {
 }
 
 func GetLastestFileMetaData(limit int) ([]model.FileMetaData, error) {
-	stmt, err := mysql.GetMysqlConn().Prepare("Select file_sha1, file_name, file_size, file_addr, update_at from tbl_file where status = 1 order by update_at desc limit ?")
+	stmt, err := mysql.GetMysqlConn().Prepare("Select file_sha1, file_name, file_size, file_addr, DATE_FORMAT(create_at,'%Y-%m-%d %H:%i:%S'), DATE_FORMAT(update_at,'%Y-%m-%d %H:%i:%S') from tbl_file where status = 1 order by update_at desc limit ?")
 	defer stmt.Close()
 	if err != nil {
 		log.Println("----------------------------预编译失败----------------------------")
@@ -124,7 +125,8 @@ func GetLastestFileMetaData(limit int) ([]model.FileMetaData, error) {
 	for rows.Next() {
 		//定义一个
 		fileMetaData := model.FileMetaData{}
-		rows.Scan(&fileMetaData.FileHash, &fileMetaData.FileName, &fileMetaData.FileSize, &fileMetaData.FileLocation, &fileMetaData.UploadTimeAt)
+		rows.Scan(&fileMetaData.FileHash, &fileMetaData.FileName, &fileMetaData.FileSize, &fileMetaData.FileLocation, &fileMetaData.UploadTimeAt, &fileMetaData.LastUpdated)
+		fileMetaData.FileSizeFormat = util.FormatFileSize(fileMetaData.FileSize)
 		ret = append(ret, fileMetaData)
 	}
 
