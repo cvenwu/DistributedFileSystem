@@ -70,11 +70,14 @@ func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("上传文件的sha1值为-------------------->", fileMetaData.FileHash)
 
 		//向数据库添加一条文件记录
-
+		//TODO:这里是否需要向文件表添加记录呢？目前我们这里是基于文件表中没有记录，因为一旦有记录就可以直接秒传来做
 		opRet := dblayer.AddFileMetaData(fileMetaData)
-		if !opRet {
-			log.Println("--------------------------文件表插入记录失败----------------------------")
-			io.WriteString(w, "文件表插入记录失败")
+		r.ParseForm()
+		username := r.Form.Get("username")
+		upRet := dblayer.UpdateUserFile(username, fileMetaData)
+		if !opRet && !upRet {
+			log.Println("--------------------------文件表或用户文件表插入记录失败----------------------------")
+			io.WriteString(w, "文件表或用户文件表插入记录失败")
 		} else {
 			//4. 返回响应表示我们上传成功
 			//重定向：返回一个302响应码，要求用户向响应头部中的url重新发起请求
@@ -124,7 +127,6 @@ func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Write(data)
 }
-
 /*
 上传成功
 */
@@ -172,7 +174,8 @@ func GetLatestFileMetaData(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("获取用户获取的文件个数失败，请稍后再试！！！"))
 		return
 	}
-	ret, err := dblayer.GetLastestFileMetaData(limitCount)
+	username := r.Form.Get("username")
+	ret, err := dblayer.GetLastestFileMetaData(username, limitCount)
 	if err != nil {
 		log.Println("----------------------------获取用户最近上传文件失败----------------------------")
 		w.Write([]byte("获取用户最近上传文件失败，请稍后再试！！！"))
@@ -228,4 +231,66 @@ func DeleteFileMetaData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte("文件删除成功"))
+}
+
+
+/*
+实现秒传：需要用户传入一个特征值，如果数据库中有这个特征值，就实现秒传
+ */
+func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
+	//1. 解析请求参数
+	r.ParseForm()
+	filehash := r.Form.Get("filehash")
+	username := r.Form.Get("username")
+
+	//2. 判断一下能否触发秒传，也就是传递的filehash是否已经存在于文件表中
+	//TODO ：这里其实应该将文件的filehash存在于redis缓存中
+	fileMetaData, isFast := IsFastUpload(filehash)
+	if !isFast {
+		resp := util.RespMsg{
+			Code: -1,
+			Msg: "秒传失败，请访问普通上传接口",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	}
+
+	//4. 如果上传过该文件，只写入记录到文件信息表，并且返回秒传成功
+	opType := dblayer.UpdateUserFile(username, fileMetaData)
+	if !opType {
+		log.Println("----------------------------秒传成功但用户文件表插入失败，请稍后再试----------------------------")
+		resp := util.RespMsg{
+			Code: -2,
+			Msg: "秒传成功但用户文件表插入失败，请稍后再试",
+		}
+		w.Write(resp.JSONBytes())
+		return
+	}
+	resp := util.RespMsg{
+		Code: 0,
+		Msg: "秒传成功",
+	}
+	w.Write(resp.JSONBytes())
+	return
+}
+
+/*
+判断能否触发秒传
+返回两个值：第1个是如果可以秒传，从数据库中查询到的对应文件的信息
+			第2个是判断是否可以秒传
+ */
+func IsFastUpload(filehash string) (model.FileMetaData, bool) {
+	//从文件表查询是否有相同hash值的文件记录
+	fileMetaData, err := dblayer.GetFileMetaData(filehash)
+	if err != nil {
+		log.Println("----------------------------根据用户传入的filehash查找对应的文件失败，请稍后再试----------------------------")
+		return model.FileMetaData{}, false
+	}
+
+	//如果查不到记录则秒传失败
+	if fileMetaData.FileName == "" {
+		return model.FileMetaData{},false
+	}
+	log.Println("----------------------------秒传成功----------------------------")
+	return fileMetaData, true
 }

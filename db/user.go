@@ -4,6 +4,7 @@ import (
 	"DFS/db/mysql"
 	"DFS/model"
 	"log"
+	"time"
 )
 
 /**
@@ -15,7 +16,7 @@ import (
 
 //处理用户注册
 func UserSignUp(username string, password string) bool {
-	stmt, err := mysql.GetMysqlConn().Prepare("insert into tbl_user(user_name, user_pwd, status) values (?, ?, 1)")
+	stmt, err := mysql.GetMysqlConn().Prepare("insert into tbl_user(user_name, user_pwd, status, signup_at) values (?, ?, 1, ?)")
 	defer stmt.Close()
 	if err != nil {
 		log.Println("----------------------------预编译失败----------------------------")
@@ -23,7 +24,7 @@ func UserSignUp(username string, password string) bool {
 	}
 
 	//将时间转换为字符串
-	ret, err := stmt.Exec(username, password)
+	ret, err := stmt.Exec(username, password, time.Now())
 	if err != nil {
 		log.Println("----------------------------用户表插入失败----------------------------", err)
 		return false

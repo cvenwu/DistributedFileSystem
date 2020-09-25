@@ -36,6 +36,8 @@ func main() {
 	http.HandleFunc("/file/update", handler.HttpInterceptor(handler.UpdateFileMetaData))
 	//获取用户最近上传文件【批量查询】
 	http.HandleFunc("/file/query", handler.HttpInterceptor(handler.GetLatestFileMetaData))
+	//尝试文件的秒传
+	http.HandleFunc("/file/fastupload", handler.HttpInterceptor(handler.TryFastUploadHandler))
 
 	//--------------处理用户相关操作
 	//用户注册

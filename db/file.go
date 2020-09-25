@@ -107,15 +107,18 @@ func UpdateFileMetaData(filehash string, filename string) bool {
 	return false
 }
 
-func GetLastestFileMetaData(limit int) ([]model.FileMetaData, error) {
-	stmt, err := mysql.GetMysqlConn().Prepare("Select file_sha1, file_name, file_size, file_addr, DATE_FORMAT(create_at,'%Y-%m-%d %H:%i:%S'), DATE_FORMAT(update_at,'%Y-%m-%d %H:%i:%S') from tbl_file where status = 1 order by update_at desc limit ?")
+/*
+查询用户最近上传的limit条文件记录
+ */
+func GetLastestFileMetaData(username string, limit int) ([]model.FileMetaData, error) {
+	stmt, err := mysql.GetMysqlConn().Prepare("Select file_sha1, file_name, file_size, DATE_FORMAT(upload_at,'%Y-%m-%d %H:%i:%S'), DATE_FORMAT(last_update,'%Y-%m-%d %H:%i:%S') from tbl_user_file where user_name = ? and status = 1 order by last_update desc limit ?")
 	defer stmt.Close()
 	if err != nil {
-		log.Println("----------------------------预编译失败----------------------------")
+		log.Println("----------------------------预编译失败----------------------------", err)
 		return []model.FileMetaData{}, err
 	}
 
-	rows, err := stmt.Query(limit)
+	rows, err := stmt.Query(username, limit)
 	if err != nil {
 		log.Println("----------------------------查询后赋值失败----------------------------", err)
 		return []model.FileMetaData{}, err
@@ -125,7 +128,7 @@ func GetLastestFileMetaData(limit int) ([]model.FileMetaData, error) {
 	for rows.Next() {
 		//定义一个
 		fileMetaData := model.FileMetaData{}
-		rows.Scan(&fileMetaData.FileHash, &fileMetaData.FileName, &fileMetaData.FileSize, &fileMetaData.FileLocation, &fileMetaData.UploadTimeAt, &fileMetaData.LastUpdated)
+		rows.Scan(&fileMetaData.FileHash, &fileMetaData.FileName, &fileMetaData.FileSize, &fileMetaData.UploadTimeAt, &fileMetaData.LastUpdated)
 		fileMetaData.FileSizeFormat = util.FormatFileSize(fileMetaData.FileSize)
 		ret = append(ret, fileMetaData)
 	}
