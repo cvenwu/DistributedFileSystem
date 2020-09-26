@@ -74,9 +74,169 @@ func FormatFileSize(fileSize int64) (size string) {
 mysql数据库如果自己插入时间记录还是会早8个小时，因此我们插入的时候自己在sql语句后面使用time.Now()对其进行赋值
 
 ## 第5章节：秒传
+[知乎大神关于如何实现秒传](https://www.zhihu.com/question/20489900)
+
 老师课上的一个衍生的问题：假如有这么一个应用场景，同时有多个用户同时上传同一个文件，这个时候云端逻辑如何处理呢？
-     参考思路：解决方法不唯一，只有结合实际的应用场景才行。
-     方法：
-     1. 允许不同用户同时上传同一个文件
-     2. 先完成上传的先入库
-     3. 后上传的只更新用户文件表，并且删除已经上传的文件
+> 参考思路：解决方法不唯一，只有结合实际的应用场景才行。
+
+方法：
+1. 允许不同用户同时上传同一个文件
+2. 先完成上传的先入库
+3. 后上传的只更新用户文件表，并且删除已经上传的文件
+     
+     
+
+## 第6章节 分块上传与断点续传
+
+自己在之前的代码做了几个改进：
+1. 用户上传文件之后，不仅插入数据库表中，还会将文件的hash以及名字缓存到redis中，之后其他用户传文件的时候判断是否可以秒传
+2. 用户上传文件的时候，首先判断是否可以秒传(从redis的缓存中查找)，如果可以，就直接秒传
+                                                      如果系统重启：就将mysql中文件表的所有的文件信息缓存到redis中
+3.          如果不满足秒传，那么此时就会进行真正的上传，如果用户上传的文件没有超过我们配置文件中需要分块的阈值，我们就可以直接上传
+                                                如果文件超过了我们自己配置文件中需要分块的阈值，就要进行分块上传
+4. 
+
+还可以改进的一点：如果上传成功，我们需要将缓存在redis中的记录删除，同时我们要将保存在data文件夹下的对应uploadid文件夹删除
+
+自己最后可以改进的一点：分块上传可以并发进行，即都可以无序传输，都传上去之后我们就可以对文件进行合并了
+
+
+自己改进的上传文件，目前还没有完成，会判断是否秒传，是否要分块传输
+```go
+func UploadFileHandler(w http.ResponseWriter, r *http.Request) {
+	//如果用户是get请求，就直接读取上传页面并返回
+	if r.Method == http.MethodGet {
+		content, err := ioutil.ReadFile("./static/view/index.html")
+		if err != nil {
+			log.Println("--------------------------打开index.html失败----------------------------")
+			io.WriteString(w, "Internal Server Error")
+			return
+		}
+		io.WriteString(w, string(content))
+	} else if r.Method == http.MethodPost { //如果是post请求，说明用户要将文件传送到云端存储
+		//1. 解析用户请求表单，获取用户携带的文件
+		//返回3个参数，第1个参数表示文件句柄，第2个参数表示用户上传的文件的文件头部
+		f, fHeader, err := r.FormFile("file")
+		if err != nil {
+			log.Println("--------------------------获取用户上传文件信息失败----------------------------")
+			w.Write([]byte("获取用户上传文件信息失败"))
+		}
+		r.ParseForm()
+		username := r.Form.Get("username")
+
+
+		//1.1 首先判断是否可以秒传
+
+		//1.1.1 读取文件内容计算哈希
+		f.Read()
+		util.FileSha1()
+
+		//1.1.2 判断是否在redis缓存中
+		rConn := rPool.GetRedisConn().Get()
+		defer rConn.Close()
+
+		data, err := redis.Values(rConn.Do("HGET tbl_file", "tbl_file:"+filehash))
+		if err != nil {
+			log.Println("--------------------------从redis中查询文件hash是否在里面失败----------------------------")
+			w.Write([]byte("从redis中查询文件hash是否在里面失败"))
+			return
+		}
+		//1.1.3 如果在redis中缓存，则执行秒传
+		if len(data[0].(string)) > 0 {
+
+		}
+
+
+
+
+		//1.1.4 如果不在redis缓存中，我们执行下面的完整的上传
+
+
+		var upRet bool //上传结果
+		//如果小于等于我们要分块的阈值，就直接上传
+		if fHeader.Size <= config.ChunkThreshold {
+			upRet = UploadFile(f, fHeader.Filename, username)
+			if !upRet {
+				io.WriteString(w, "上传失败，请稍后再试")
+				return
+			}
+		} else {
+			//TODO：这里开始整合一下就可以了
+			//走到这里说明要分块了
+			//1. 初始化分块信息
+			InitializeMulpartInfo()
+			//2. 上传分块
+			UploadPart()
+			//3. 合并分块
+			MergeMultiPart()
+
+		}
+
+		//重定向：返回一个302响应码，要求用户向响应头部中的url重新发起请求
+		http.Redirect(w, r, "/static/view/home.html", http.StatusFound)
+	}
+}
+
+```
+
+
+
+学到的知识：
+Golang中删除文件：`os.Remove(文件名)`
+Golang中删除空文件夹：`os.Remove(空文件夹名)`
+Golang中删除有文件的文件夹：`os.RemoveAll()`
+
+
+自己测试的文件合并：
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+)
+
+/**
+ * @Author: yirufeng
+ * @Email: yirufeng@foxmail.com
+ * @Date: 2020/9/26 11:28 上午
+ * @Desc:
+ */
+
+func main() {
+
+
+	f, err := os.Open("./蔡徐坤.gif")
+
+	buf := make([]byte, 1024*1024)
+	wSize, err := f.Read(buf)
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Println(wSize)
+
+	buf2 := make([]byte, 1024*1024)
+	wSize, err = f.Read(buf2)
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Println(wSize)
+
+	buf3 := make([]byte, 1024*1024)
+	wSize, err = f.Read(buf3)
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Println(wSize)
+
+	content := []byte{}
+	content = append(content, buf...)
+	content = append(content, buf2...)
+	content = append(content, buf3[:wSize]...)
+
+	newF, err := os.Create("1.gif")
+	newF.Write(content)
+	newF.Close()
+}
+```

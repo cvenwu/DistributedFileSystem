@@ -5,6 +5,7 @@ import (
 	"DFS/model"
 	"DFS/util"
 	"log"
+	"time"
 )
 
 /**
@@ -44,7 +45,7 @@ func AddFileMetaData(fileMetaData model.FileMetaData) bool {
 		log.Println("----------------------------预编译失败----------------------------")
 		return false
 	}
-	ret, err := stmt.Exec(fileMetaData.FileHash, fileMetaData.FileName, fileMetaData.FileSize, fileMetaData.FileLocation, fileMetaData.UploadTimeAt, fileMetaData.UploadTimeAt)
+	ret, err := stmt.Exec(fileMetaData.FileHash, fileMetaData.FileName, fileMetaData.FileSize, fileMetaData.FileLocation, time.Now(), time.Now())
 	if err != nil {
 		log.Println("----------------------------文件表插入记录失败----------------------------")
 		return false

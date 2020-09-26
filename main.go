@@ -17,12 +17,13 @@ import (
 2. 下载文件
 */
 
+
 func main() {
 	// http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(assets.AssetFS())))
 	http.Handle("/static/",
 		http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
-	//上传文件
+	//普通上传文件
 	http.HandleFunc("/file/upload", handler.HttpInterceptor(handler.UploadFileHandler))
 	//上传文件成功对应的监听函数
 	http.HandleFunc("/file/upload/suc", handler.HttpInterceptor(handler.UploadFileSucHandler))
@@ -38,6 +39,21 @@ func main() {
 	http.HandleFunc("/file/query", handler.HttpInterceptor(handler.GetLatestFileMetaData))
 	//尝试文件的秒传
 	http.HandleFunc("/file/fastupload", handler.HttpInterceptor(handler.TryFastUploadHandler))
+
+
+	//--------------文件分块上传相关操作
+	//初始化分块信息
+	http.HandleFunc("/file/mpupload/init", handler.HttpInterceptor(handler.InitiateMultipartUploadHandler))
+	//上传分块
+	http.HandleFunc("/file/mpupload/uppart", handler.HttpInterceptor(handler.UploadPartHandler))
+	//通知分块上传完成
+	http.HandleFunc("/file/mpupload/complete", handler.HttpInterceptor(handler.CompleteUploadPartHandler))
+	//取消上传分块
+	http.HandleFunc("/file/mpupload/cancel", handler.HttpInterceptor(handler.CancelUploadPartHandler))
+	//查看分块上传的整体状态
+	http.HandleFunc("/file/mpupload/status", handler.HttpInterceptor(handler.MultipartUploadStatusHandler))
+
+
 
 	//--------------处理用户相关操作
 	//用户注册

@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
@@ -18,8 +19,8 @@ import (
 /**
  * @Author: yirufeng
  * @Email: yirufeng@foxmail.com
- * @Date: 2020/9/23 9:35 上午
- * @Desc:
+ * @Date: 2020/9/26 9:31 上午
+ * @Desc: 普通上传文件
  */
 
 /*
@@ -127,6 +128,7 @@ func DownloadFileHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Write(data)
 }
+
 /*
 上传成功
 */
@@ -233,10 +235,9 @@ func DeleteFileMetaData(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("文件删除成功"))
 }
 
-
 /*
 实现秒传：需要用户传入一个特征值，如果数据库中有这个特征值，就实现秒传
- */
+*/
 func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
 	//1. 解析请求参数
 	r.ParseForm()
@@ -249,7 +250,7 @@ func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
 	if !isFast {
 		resp := util.RespMsg{
 			Code: -1,
-			Msg: "秒传失败，请访问普通上传接口",
+			Msg:  "秒传失败，请访问普通上传接口",
 		}
 		w.Write(resp.JSONBytes())
 		return
@@ -261,14 +262,14 @@ func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println("----------------------------秒传成功但用户文件表插入失败，请稍后再试----------------------------")
 		resp := util.RespMsg{
 			Code: -2,
-			Msg: "秒传成功但用户文件表插入失败，请稍后再试",
+			Msg:  "秒传成功但用户文件表插入失败，请稍后再试",
 		}
 		w.Write(resp.JSONBytes())
 		return
 	}
 	resp := util.RespMsg{
 		Code: 0,
-		Msg: "秒传成功",
+		Msg:  "秒传成功",
 	}
 	w.Write(resp.JSONBytes())
 	return
@@ -278,7 +279,7 @@ func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
 判断能否触发秒传
 返回两个值：第1个是如果可以秒传，从数据库中查询到的对应文件的信息
 			第2个是判断是否可以秒传
- */
+*/
 func IsFastUpload(filehash string) (model.FileMetaData, bool) {
 	//从文件表查询是否有相同hash值的文件记录
 	fileMetaData, err := dblayer.GetFileMetaData(filehash)
@@ -289,8 +290,49 @@ func IsFastUpload(filehash string) (model.FileMetaData, bool) {
 
 	//如果查不到记录则秒传失败
 	if fileMetaData.FileName == "" {
-		return model.FileMetaData{},false
+		return model.FileMetaData{}, false
 	}
 	log.Println("----------------------------秒传成功----------------------------")
 	return fileMetaData, true
+}
+
+/*
+普通上传文件
+*/
+func UploadFile(f multipart.File, filename string, username string) bool {
+	//本地新建一个文件用来存储用户上传的文件
+	localFile, err := os.Create("./tmp/" + filename)
+	defer localFile.Close() //记得操作完成之后关闭文件
+	if err != nil {
+		log.Println("--------------------------云端创建要存储的文件失败----------------------------")
+		return false
+	}
+	writeSize, err := io.Copy(localFile, f)
+
+	if err != nil {
+		log.Println("--------------------------云端创建写入文件失败----------------------------")
+		return false
+	}
+	//将文件写入到我们的存储地址，同时向数据库表中添加记录
+	//新建一个文件结构体
+	fileMetaData := model.FileMetaData{
+		FileName:     filename,
+		UploadTimeAt: time.Now().Format("2006-01-02 15:04:05"),
+		FileLocation: "./tmp/" + filename, //TODO:这里如果这样写代码，如何确保用户不会上传同一个文件名的不同文件造成文件覆盖
+	}
+	fileMetaData.FileSize = writeSize
+	localFile.Seek(0, 0)
+	//因为要计算文件哈希值需要从文件头部开始计算，所以要文件的游标移动到文件的最开始位置处
+	fileMetaData.FileHash = util.FileSha1(localFile)
+	log.Println("上传文件的sha1值为-------------------->", fileMetaData.FileHash)
+
+	//向数据库添加一条文件记录
+	//TODO:这里是否需要向文件表添加记录呢？目前我们这里是基于文件表中没有记录，因为一旦有记录就可以直接秒传来做
+	opRet := dblayer.AddFileMetaData(fileMetaData)
+	upRet := dblayer.UpdateUserFile(username, fileMetaData)
+	if !opRet || !upRet {
+		log.Println("--------------------------文件表或用户文件表插入记录失败----------------------------")
+		return false
+	}
+	return true
 }
