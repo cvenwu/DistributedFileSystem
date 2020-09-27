@@ -24,7 +24,7 @@ func main() {
 		http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
 
 	//普通上传文件
-	http.HandleFunc("/file/upload", handler.HttpInterceptor(handler.UploadFileHandler))
+	http.HandleFunc("/file/upload", handler.HttpInterceptor(handler.UploadFileHandler2))
 	//上传文件成功对应的监听函数
 	http.HandleFunc("/file/upload/suc", handler.HttpInterceptor(handler.UploadFileSucHandler))
 	//下载文件

@@ -29,7 +29,7 @@ import (
 //初始化信息
 type MultipartUploadInfo struct {
 	FileHash   string
-	FileSize   int
+	FileSize   int64
 	UploadId   string //上传的id号
 	ChunkSize  int    //分块的大小
 	ChunkCount int
@@ -38,7 +38,7 @@ type MultipartUploadInfo struct {
 /*
 初始化分块信息
 */
-func InitializeMulpartInfo(filehash string, filesize int, username string, multiUploadInfo *MultipartUploadInfo) bool {
+func InitializeMulpartInfo(filehash string, filesize int64, username string, multiUploadInfo *MultipartUploadInfo) bool {
 
 	//2. 获得redis的一个连接通过Get
 	rConn := rPool.GetRedisConn().Get()
@@ -82,7 +82,7 @@ func InitiateMultipartUploadHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	multiUploadInfo := MultipartUploadInfo{}
-	iniRet := InitializeMulpartInfo(filehash, filesize, username, &multiUploadInfo)
+	iniRet := InitializeMulpartInfo(filehash, int64(filesize), username, &multiUploadInfo)
 	if !iniRet {
 		log.Println("----------------------------初始化分块信息失败，请稍后再试----------------------------")
 		w.Write(util.NewRespMsg(-1, "初始化分块信息失败，请稍后再试", nil).JSONBytes())

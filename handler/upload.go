@@ -1,6 +1,8 @@
 package handler
 
 import (
+	rPool "DFS/cache/redis"
+	"DFS/config"
 	dblayer "DFS/db"
 	"DFS/model"
 	"DFS/util"
@@ -22,6 +24,109 @@ import (
  * @Date: 2020/9/26 9:31 上午
  * @Desc: 普通上传文件
  */
+
+func UploadFileHandler2(w http.ResponseWriter, r *http.Request) {
+	//如果用户是get请求，就直接读取上传页面并返回
+	if r.Method == http.MethodGet {
+		content, err := ioutil.ReadFile("./static/view/index.html")
+		if err != nil {
+			log.Println("--------------------------打开index.html失败----------------------------")
+			io.WriteString(w, "Internal Server Error")
+			return
+		}
+		io.WriteString(w, string(content))
+	} else if r.Method == http.MethodPost {
+		//如果是post请求，说明用户要将文件传送到云端存储
+		//1. 解析用户请求表单，获取用户携带的文件
+		r.ParseForm()
+		username := r.Form.Get("username")
+		//返回3个参数，第1个参数表示文件句柄，第2个参数表示用户上传的文件的文件头部
+		f, fHeader, err := r.FormFile("file")
+
+		if err != nil {
+			log.Println("--------------------------获取用户上传文件信息失败----------------------------")
+			w.Write([]byte("获取用户上传文件信息失败"))
+		}
+
+		//1.1 首先判断是否可以秒传
+		//TODO：如果文件内容太大我们也要读取出来计算文件hash么
+		//1.1.1 读取文件内容计算哈希
+		filehash := r.Form.Get("filehash")
+		fileMetaData, isFast := IsFastUpload(filehash)
+		//1.1.2 判断是否在redis缓存中
+
+		//如果不可以秒传
+		if isFast { //说明可以秒传
+			opType := dblayer.UpdateUserFile(username, fileMetaData)
+			if !opType {
+				log.Println("----------------------------秒传成功但用户文件表插入失败，请稍后再试----------------------------")
+				resp := util.RespMsg{
+					Code: -2,
+					Msg:  "秒传成功但用户文件表插入失败，请稍后再试",
+				}
+				w.Write(resp.JSONBytes())
+				return
+			}
+			resp := util.RespMsg{
+				Code: 0,
+				Msg:  "秒传成功",
+			}
+			w.Write(resp.JSONBytes())
+			return
+		}
+
+		//1.1.4 如果不在redis缓存中，我们执行下面的完整的上传
+		var upRet bool //上传结果
+		//如果小于等于我们要分块的阈值，就直接上传
+		if fHeader.Size <= config.ChunkThreshold {
+			upRet = UploadFile(f, fHeader.Filename, username)
+			if !upRet {
+				io.WriteString(w, "上传失败，请稍后再试")
+				return
+			}
+		} else {
+			//TODO：这里开始整合一下就可以了
+			//走到这里说明要分块了
+			//1. 初始化分块信息
+			multiUploadInfo := MultipartUploadInfo{}
+			iniRet := InitializeMulpartInfo(filehash, fHeader.Size, username, &multiUploadInfo)
+			if !iniRet {
+				log.Println("----------------------------初始化分块信息失败，请稍后再试----------------------------")
+				w.Write(util.NewRespMsg(-1, "初始化分块信息失败，请稍后再试", nil).JSONBytes())
+				return
+			}
+			//2. 上传分块
+			for i := 1; i <= multiUploadInfo.ChunkCount; i++ { //一共需要多少块
+				//TODO：这一行代码应该会有点小问题
+				upRet = UploadPart(multiUploadInfo.UploadId, strconv.Itoa(i), r.Body)
+				if !upRet {
+					log.Printf("----------------------------第%d个分块上传失败，一共%d个分块----------------------------\n", i, multiUploadInfo.ChunkCount)
+				}
+				log.Printf("----------------------------第%d个分块上传成功，一共%d个分块----------------------------\n", i, multiUploadInfo.ChunkCount)
+			}
+
+			if !upRet {
+				w.Write(util.NewRespMsg(-1, "Upload part failed", nil).JSONBytes())
+				return
+			}
+			//3. 合并分块
+			mergeRet := MergeMultiPart(multiUploadInfo.UploadId, multiUploadInfo.ChunkCount, fHeader.Filename)
+			if !mergeRet {
+				log.Println("----------------------------分块合并失败----------------------------")
+			}
+
+			log.Println("----------------------------分块流程成功----------------------------")
+
+		}
+		//走到这里标志上传成功，此时我们将上传成功的文件信息缓存到redis中
+		//hset tbl_file tbl_file:文件哈希 文件存放的路径/文件名
+		//将文件存放的路径拼接成文件名存放到redis中，后期我们可以直接查询redis中是否有该文件从而直接打开文件进行读写
+		rPool.GetRedisConn().Get().Do("HSET tbl_file", "tbl_file:"+filehash)
+		log.Println("----------------------------上传成功，写入redis缓存成功----------------------------")
+		//重定向：返回一个302响应码，要求用户向响应头部中的url重新发起请求
+		http.Redirect(w, r, "/static/view/home.html", http.StatusFound)
+	}
+}
 
 /*
 上传文件
@@ -233,67 +338,6 @@ func DeleteFileMetaData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte("文件删除成功"))
-}
-
-/*
-实现秒传：需要用户传入一个特征值，如果数据库中有这个特征值，就实现秒传
-*/
-func TryFastUploadHandler(w http.ResponseWriter, r *http.Request) {
-	//1. 解析请求参数
-	r.ParseForm()
-	filehash := r.Form.Get("filehash")
-	username := r.Form.Get("username")
-
-	//2. 判断一下能否触发秒传，也就是传递的filehash是否已经存在于文件表中
-	//TODO ：这里其实应该将文件的filehash存在于redis缓存中
-	fileMetaData, isFast := IsFastUpload(filehash)
-	if !isFast {
-		resp := util.RespMsg{
-			Code: -1,
-			Msg:  "秒传失败，请访问普通上传接口",
-		}
-		w.Write(resp.JSONBytes())
-		return
-	}
-
-	//4. 如果上传过该文件，只写入记录到文件信息表，并且返回秒传成功
-	opType := dblayer.UpdateUserFile(username, fileMetaData)
-	if !opType {
-		log.Println("----------------------------秒传成功但用户文件表插入失败，请稍后再试----------------------------")
-		resp := util.RespMsg{
-			Code: -2,
-			Msg:  "秒传成功但用户文件表插入失败，请稍后再试",
-		}
-		w.Write(resp.JSONBytes())
-		return
-	}
-	resp := util.RespMsg{
-		Code: 0,
-		Msg:  "秒传成功",
-	}
-	w.Write(resp.JSONBytes())
-	return
-}
-
-/*
-判断能否触发秒传
-返回两个值：第1个是如果可以秒传，从数据库中查询到的对应文件的信息
-			第2个是判断是否可以秒传
-*/
-func IsFastUpload(filehash string) (model.FileMetaData, bool) {
-	//从文件表查询是否有相同hash值的文件记录
-	fileMetaData, err := dblayer.GetFileMetaData(filehash)
-	if err != nil {
-		log.Println("----------------------------根据用户传入的filehash查找对应的文件失败，请稍后再试----------------------------")
-		return model.FileMetaData{}, false
-	}
-
-	//如果查不到记录则秒传失败
-	if fileMetaData.FileName == "" {
-		return model.FileMetaData{}, false
-	}
-	log.Println("----------------------------秒传成功----------------------------")
-	return fileMetaData, true
 }
 
 /*

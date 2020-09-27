@@ -198,6 +198,8 @@ Golang中删除文件：`os.Remove(文件名)`
 Golang中删除空文件夹：`os.Remove(空文件夹名)`
 Golang中删除有文件的文件夹：`os.RemoveAll()`
 
+虚拟机连接不上redis参考：[参考](https://www.cnblogs.com/gara/p/9524014.html)
+
 
 自己测试的文件合并：
 ```go
